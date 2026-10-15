@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Road Fighter · Carrera arcade clásica</title>
+  <meta name="description" content="Road Fighter: el mítico juego de carreras arcade con cámara dual (1ª Persona 3D y Cenital clásica). Esquiva el tráfico, recoge combustible y cruza la meta con teclado (Flechas / WASD) o pantalla táctil.">
+  <meta name="theme-color" content="#0a0d1f">
+
+  <!-- =========================================================================
+       Fuentes de Google:
+       - Orbitron: Estética futurista arcade para marcadores, títulos y números.
+       - Rajdhani: Tipografía condensada de alta legibilidad para textos de interfaz.
+       ========================================================================= -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Hoja de estilos principal -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- =========================================================================
+       FONDO AMBIENTAL
+       Gradiente radial oscuro con esferas brillantes animadas (glow) y líneas
+       diagonales estilo scanline para generar atmósfera arcade inmersiva.
+       ========================================================================= -->
+  <div class="bg" aria-hidden="true">
+    <span class="bg-glow g1"></span>
+    <span class="bg-glow g2"></span>
+    <span class="bg-lines"></span>
+  </div>
+
+  <!-- Contenedor principal de la aplicación -->
+  <main class="app">
+
+    <!-- =======================================================================
+         PANEL IZQUIERDO: CONTROLES DEL JUEGO
+         Visible en pantallas medianas y grandes. Explica el mapeo dual de teclas
+         tanto para flechas del teclado como para la clásica combinación WASD.
+         ======================================================================= -->
+    <aside class="panel panel-left" aria-label="Controles">
+      <h2>Controles</h2>
+      <ul class="keys">
+        <!-- Dirección / Girar el coche y volante -->
+        <li>
+          <div class="kbd-group"><kbd>←</kbd><kbd>→</kbd></div>
+          <span class="or">o</span>
+          <div class="kbd-group"><kbd>A</kbd><kbd>D</kbd></div>
+          <p>Girar volante / dirección</p>
+        </li>
+        <!-- Acelerador -->
+        <li>
+          <div class="kbd-group"><kbd>↑</kbd></div>
+          <span class="or">o</span>
+          <div class="kbd-group"><kbd>W</kbd></div>
+          <p>Acelerar</p>
+        </li>
+        <!-- Freno -->
+        <li>
+          <div class="kbd-group"><kbd>↓</kbd></div>
+          <span class="or">o</span>
+          <div class="kbd-group"><kbd>S</kbd></div>
+          <p>Frenar</p>
+        </li>
+        <!-- Turbo / Marcha Alta -->
+        <li>
+          <div class="kbd-group"><kbd class="wide">Espacio</kbd></div>
+          <span class="or">o</span>
+          <div class="kbd-group"><kbd class="wide">Shift</kbd></div>
+          <p>Marcha alta (turbo)</p>
+        </li>
+        <!-- Pausa -->
+        <li>
+          <div class="kbd-group"><kbd>P</kbd></div>
+          <span class="or">/</span>
+          <div class="kbd-group"><kbd>Esc</kbd></div>
+          <p>Pausa</p>
+        </li>
+        <!-- Cambio de cámara -->
+        <li>
+          <div class="kbd-group"><kbd>C</kbd></div>
+          <p>Alternar cámara (1ª Persona / Cenital)</p>
+        </li>
+        <!-- Silenciar audio -->
+        <li>
+          <div class="kbd-group"><kbd>M</kbd></div>
+          <p>Silenciar / activar sonido</p>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- =======================================================================
+         ZONA CENTRAL: LIENZO DE JUEGO (CANVAS) Y CAPAS SUPERPUESTAS (OVERLAYS)
+         ======================================================================= -->
+    <section class="game-wrap" id="gameWrap">
+      <!-- Lienzo principal HTML5 donde se renderiza la carrera a 60 FPS -->
+      <canvas id="game" aria-label="Pantalla de juego de Road Fighter"></canvas>
+
+      <!-- Botón flotante superior izquierdo: Silenciar / Activar sonido -->
+      <button class="mute-btn" id="muteBtn" type="button" aria-label="Silenciar o activar sonido" title="Sonido (Tecla M)">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path id="muteIcon" fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/>
+        </svg>
+      </button>
+
+      <!-- Botón flotante superior derecho: Alternar entre 1ª Persona 3D y Cenital 2D -->
+      <button class="cam-btn" id="camBtn" type="button" aria-label="Cambiar vista de cámara" title="Cámara (Tecla C)">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
+          <path d="M4 4h3l2-2h6l2 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm8 3a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/>
+        </svg>
+        <span id="camLabel">1ª PERS.</span>
+      </button>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 1: MENÚ PRINCIPAL
+           Muestra el logo retro animado, las estadísticas históricas y el botón de inicio.
+           ------------------------------------------------------------------- -->
+      <div class="overlay" id="menu">
+        <div class="card card-menu">
+          <p class="eyebrow">★ Arcade Racing ★</p>
+          <h1 class="logo"><span>ROAD</span><span>FIGHTER</span></h1>
+          <p class="tagline">Esquiva el tráfico. Recoge combustible. Cruza la meta.</p>
+          <div class="menu-stats">
+            <div><small>Récord</small><strong id="menuHi">000000</strong></div>
+            <div><small>Etapas</small><strong>5</strong></div>
+            <!-- Créditos de juego disponibles (cada partida cuesta 1); clic para administrarlos -->
+            <div class="credits-box" id="menuCreditsBox" role="button" tabindex="-1" title="Créditos y premios"><small>Créditos</small><strong>🪙 <span id="menuCredits">3</span></strong></div>
+          </div>
+          <!-- Selector del generador pseudoaleatorio que controla la aparición del tráfico -->
+          <div class="rng-select">
+            <label>
+              <small>Generador</small>
+              <select id="rngMethod">
+                <option value="middle-square">Cuadrado medio</option>
+                <option value="lcg" selected>Congruencial lineal</option>
+                <option value="middle-product">Productos medios</option>
+              </select>
+            </label>
+            <label>
+              <small>Semilla</small>
+              <input id="rngSeed" type="text" inputmode="numeric" maxlength="9" placeholder="Automática" autocomplete="off">
+            </label>
+            <p class="rng-info" id="rngInfo">Vacío = semilla automática (reloj)</p>
+            <!-- Dificultad: vidas, densidad y velocidad del tráfico, consumo de combustible -->
+            <div class="diff-select" role="radiogroup" aria-label="Dificultad">
+              <small>Dificultad</small>
+              <label><input type="radio" name="diff" value="easy"><span>Fácil</span></label>
+              <label><input type="radio" name="diff" value="normal" checked><span>Normal</span></label>
+              <label><input type="radio" name="diff" value="hard"><span>Difícil</span></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btnPlay" type="button">▶ Jugar</button>
+          <div class="menu-links">
+            <button class="btn btn-ghost btn-small" id="btnScores" type="button">🏆 Ranking</button>
+            <button class="btn btn-ghost btn-small" id="btnWallet" type="button">🪙 Créditos</button>
+            <button class="btn btn-ghost btn-small" id="btnCredits" type="button">Autores</button>
+          </div>
+          <p class="hint">Pulsa <kbd>Enter</kbd> para empezar</p>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 2: MENÚ DE PAUSA
+           Permite reanudar la partida o salir al menú principal.
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="pause">
+        <div class="card">
+          <h2 class="title">Pausa</h2>
+          <button class="btn btn-primary" id="btnResume" type="button">▶ Continuar</button>
+          <button class="btn btn-ghost" id="btnQuit" type="button">Salir al menú</button>
+          <p class="hint">Pulsa <kbd>P</kbd> para continuar</p>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 3: ETAPA COMPLETADA (STAGE CLEAR)
+           Desglose de bonificaciones (combustible restante, vidas preservadas, puntos).
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="stageclear">
+        <div class="card">
+          <p class="eyebrow">🏁 Meta alcanzada</p>
+          <h2 class="title" id="scTitle">Etapa 1 completada</h2>
+          <dl class="results">
+            <div><dt>Tiempo</dt><dd id="scTime">0:00</dd></div>
+            <div><dt>Bonus combustible</dt><dd id="scFuel">0</dd></div>
+            <div><dt>Bonus vidas</dt><dd id="scLives">0</dd></div>
+            <div><dt>Bonus etapa</dt><dd id="scStage">0</dd></div>
+            <div class="total"><dt>Puntuación</dt><dd id="scScore">0</dd></div>
+          </dl>
+          <button class="btn btn-primary" id="btnNext" type="button">Siguiente etapa ▶</button>
+          <p class="hint" id="scNext">Próxima: DESIERTO</p>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 4: FIN DE PARTIDA (GAME OVER)
+           Aparece cuando el jugador agota sus vidas o se queda sin combustible.
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="gameover">
+        <div class="card card-danger">
+          <p class="eyebrow" id="goReason">Te has estrellado</p>
+          <h2 class="title">Game Over</h2>
+          <dl class="results">
+            <div><dt>Etapa</dt><dd id="goStage">1</dd></div>
+            <div class="total"><dt>Puntuación</dt><dd id="goScore">0</dd></div>
+            <div><dt>Récord</dt><dd id="goHi">0</dd></div>
+            <div><dt>Generador · Semilla</dt><dd id="goRng">-</dd></div>
+            <div><dt>Dificultad</dt><dd id="goDiff">-</dd></div>
+          </dl>
+          <p class="newrecord hidden" id="goNew">★ ¡Nuevo récord! ★</p>
+          <p class="prizes hidden" data-prizes></p>
+          <!-- Registro en la tabla de puntajes (solo si la puntuación entra en el top 10) -->
+          <form class="name-entry hidden" data-entry autocomplete="off">
+            <label>Entraste en la tabla. Tu nombre:
+              <input type="text" maxlength="12" placeholder="Jugador" required>
+            </label>
+            <button class="btn btn-primary btn-small" type="submit">Guardar</button>
+          </form>
+          <p class="hint hidden" data-saved></p>
+          <button class="btn btn-primary" id="btnRetry" type="button">↻ Reintentar</button>
+          <button class="btn btn-ghost" id="btnMenu1" type="button">Menú principal</button>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 5: VICTORIA FINAL
+           Pantalla de felicitación tras completar las 5 etapas del campeonato.
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="victory">
+        <div class="card card-gold">
+          <p class="eyebrow">🏆 ¡Campeón!</p>
+          <h2 class="title">Has completado Road Fighter</h2>
+          <dl class="results">
+            <div class="total"><dt>Puntuación final</dt><dd id="vScore">0</dd></div>
+            <div><dt>Récord</dt><dd id="vHi">0</dd></div>
+          </dl>
+          <p class="newrecord hidden" id="vNew">★ ¡Nuevo récord! ★</p>
+          <p class="prizes hidden" data-prizes></p>
+          <form class="name-entry hidden" data-entry autocomplete="off">
+            <label>Entraste en la tabla. Tu nombre:
+              <input type="text" maxlength="12" placeholder="Jugador" required>
+            </label>
+            <button class="btn btn-primary btn-small" type="submit">Guardar</button>
+          </form>
+          <p class="hint hidden" data-saved></p>
+          <button class="btn btn-primary" id="btnAgain" type="button">↻ Jugar de nuevo</button>
+          <button class="btn btn-ghost" id="btnMenu2" type="button">Menú principal</button>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 6: TABLA DE PUNTAJES MÁS ALTOS (TOP 10)
+           Se guarda en el navegador (localStorage) con nombre, etapa, dificultad,
+           generador y semilla, para poder repetir la partida.
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="scores">
+        <div class="card card-wide">
+          <p class="eyebrow">🏆 Top 10</p>
+          <h2 class="title">Mejores puntajes</h2>
+          <div class="scores-wrap">
+            <table class="scores">
+              <thead><tr><th>#</th><th>Nombre</th><th>Puntos</th><th>Etapa</th><th>Dific.</th><th>Generador</th></tr></thead>
+              <tbody id="scoresBody"></tbody>
+            </table>
+            <p class="hint hidden" id="scoresEmpty">Aún no hay puntajes. ¡Juega una partida!</p>
+          </div>
+          <button class="btn btn-ghost" data-back type="button">← Volver</button>
+          <button class="btn btn-ghost btn-small" id="btnClearScores" type="button">Borrar tabla</button>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 8: CRÉDITOS DE JUEGO (FICHAS) Y PREMIOS
+           Cada partida cuesta 1 crédito; se ganan con premios o insertando fichas.
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="wallet">
+        <div class="card card-wide">
+          <p class="eyebrow">🪙 Fichas y premios</p>
+          <h2 class="title">Créditos de juego</h2>
+          <div class="wallet-top">
+            <div class="wallet-big"><strong id="wCredits">3</strong><small>créditos disponibles<br>(máx. 9)</small></div>
+            <button class="btn btn-primary btn-small" id="btnCoin" type="button">🪙 Insertar ficha<br>+1 crédito</button>
+          </div>
+          <p class="hint" id="wMsg">Cada partida cuesta 1 crédito.</p>
+          <dl class="wallet-stats">
+            <div><dt>Partidas</dt><dd id="wPlayed">0</dd></div>
+            <div><dt>Fichas</dt><dd id="wInserted">0</dd></div>
+            <div><dt>Ganados</dt><dd id="wEarned">0</dd></div>
+          </dl>
+          <div class="wallet-cols">
+            <div class="wallet-box">
+              <b>Premios</b>
+              <ul>
+                <li>❤ +1 vida cada 10 000 puntos</li>
+                <li>🏁 +1 crédito al completar las 5 etapas</li>
+                <li>🏆 +1 crédito al quedar en el top 3</li>
+              </ul>
+            </div>
+            <div class="wallet-box">
+              <b>Historial</b>
+              <ol id="wHistory"></ol>
+              <p class="hint hidden" id="wEmpty">Sin movimientos.</p>
+            </div>
+          </div>
+          <button class="btn btn-ghost" data-back type="button">← Volver</button>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           OVERLAY 7: CRÉDITOS (AUTORES)
+           Completa los campos marcados con [completar].
+           ------------------------------------------------------------------- -->
+      <div class="overlay hidden" id="credits">
+        <div class="card card-wide">
+          <p class="eyebrow">Reto 2 · Modelamiento y Simulación</p>
+          <h2 class="title">Autores</h2>
+          <dl class="credits">
+            <div class="wide"><dt>Desarrollo</dt><dd>[completar: nombre(s) del equipo]</dd></div>
+            <div><dt>Docente</dt><dd>[completar]</dd></div>
+            <div><dt>Institución</dt><dd>[completar]</dd></div>
+            <div class="wide"><dt>Proyecto base</dt><dd>[completar: autor o enlace del proyecto original]</dd></div>
+            <div><dt>Juego original</dt><dd>Road Fighter (Konami, 1984)</dd></div>
+            <div class="wide"><dt>Números pseudoaleatorios</dt><dd>Cuadrado medio, congruencial lineal y productos medios, implementados en <code>js/prng.js</code></dd></div>
+            <div class="wide"><dt>Gráficos y sonido</dt><dd>Dibujados y sintetizados por código (Canvas 2D y Web Audio API), sin imágenes ni audios externos</dd></div>
+            <div><dt>Tipografías</dt><dd>Orbitron y Rajdhani (Google Fonts)</dd></div>
+          </dl>
+          <button class="btn btn-ghost" data-back type="button">← Volver</button>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------------------------
+           CONTROLES TÁCTILES VIRTUALES (MÓVILES / TABLETS)
+           Aparecen automáticamente en dispositivos con pantalla táctil.
+           ------------------------------------------------------------------- -->
+      <div class="touch" id="touch" aria-hidden="true">
+        <!-- Lado izquierdo: Girar izquierda / derecha -->
+        <div class="touch-side">
+          <button type="button" data-key="left" aria-label="Girar a la izquierda">◀</button>
+          <button type="button" data-key="right" aria-label="Girar a la derecha">▶</button>
+        </div>
+        <!-- Lado derecho: Turbo, Freno, Acelerador -->
+        <div class="touch-side">
+          <button type="button" data-key="turbo" class="small" aria-label="Marcha alta turbo">TURBO</button>
+          <button type="button" data-key="down" class="brake" aria-label="Frenar">■</button>
+          <button type="button" data-key="up" class="gas" aria-label="Acelerar">▲</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         PANEL DERECHO: GUÍA RÁPIDA DE ELEMENTOS Y CONSEJOS
+         Muestra la leyenda con previsualizaciones de los sprites procedurales.
+         ======================================================================= -->
+    <aside class="panel panel-right" aria-label="Guía del juego">
+      <h2>Guía</h2>
+      <ul class="legend">
+        <!-- Bidón de combustible -->
+        <li>
+          <canvas width="52" height="52" data-sprite="fuel"></canvas>
+          <div><b>Combustible</b><span>Recógelo o te quedarás sin gasolina.</span></div>
+        </li>
+        <!-- Mancha de aceite -->
+        <li>
+          <canvas width="52" height="52" data-sprite="oil"></canvas>
+          <div><b>Mancha de aceite</b><span>Hace derrapar tu coche peligrosamente.</span></div>
+        </li>
+        <!-- Coche deportivo rival -->
+        <li>
+          <canvas width="52" height="52" data-sprite="sport"></canvas>
+          <div><b>Deportivo</b><span>Te persigue y cambia agresivamente de carril.</span></div>
+        </li>
+        <!-- Camión de carga pesada -->
+        <li>
+          <canvas width="52" height="52" data-sprite="truck"></canvas>
+          <div><b>Camión</b><span>Lento, masivo y difícil de esquivar. ¡Adelántalo!</span></div>
+        </li>
+        <!-- Peatón cruzando -->
+        <li>
+          <canvas width="52" height="52" data-sprite="ped"></canvas>
+          <div><b>Peatón</b><span>Cruza por el paso de cebra. Atropellarlo cuesta una vida.</span></div>
+        </li>
+        <!-- Bache -->
+        <li>
+          <canvas width="52" height="52" data-sprite="hole"></canvas>
+          <div><b>Bache</b><span>Frena el coche en seco y lo hace botar.</span></div>
+        </li>
+        <!-- Barrera de obras -->
+        <li>
+          <canvas width="52" height="52" data-sprite="barrier"></canvas>
+          <div><b>Obras</b><span>Barrera fija que cierra un carril. Chocar cuesta una vida.</span></div>
+        </li>
+      </ul>
+      <div class="tip">
+        <b>Consejo</b>
+        <span>La marcha alta (turbo) alcanza mayor velocidad punta pero consume combustible rápidamente. Los adelantamientos ajustados otorgan bonificaciones de puntos extra.</span>
+      </div>
+
+      <!-- Panel de últimos carriles generados (visible durante la partida en lugar del consejo).
+           Muestra qué carril eligió el generador pseudoaleatorio para cada vehículo. -->
+      <div class="lanes-panel" id="lanesPanel" aria-live="off">
+        <b>Últimos carriles</b>
+        <span class="lp-gen" id="lpGen">—</span>
+        <div class="lp-head"><span></span><span>C1</span><span>C2</span><span>C3</span><span>C4</span></div>
+        <div class="lp-grid" id="lpGrid"></div>
+        <div class="lp-counts" id="lpCounts"></div>
+        <span class="lp-stats" id="lpStats">0 apariciones</span>
+        <span class="lp-key"><i class="t-sedan">S</i> sedán <i class="t-sport">D</i> deportivo <i class="t-truck">C</i> camión <i class="t-oil">A</i> aceite <i class="t-hole">B</i> bache <i class="t-barrier">O</i> obras</span>
+      </div>
+    </aside>
+  </main>
+
+  <!-- =========================================================================
+       SCRIPTS DEL JUEGO (Cargados en orden estricto de dependencias):
+       1. sprites.js : Generación procedural de texturas y sprites 2D y 3D en memoria.
+       2. audio.js   : Síntesis de sonido WebAudio procedural (motor, música y sfx).
+       3. game.js    : Motor del juego, físicas, lógica, bucle principal y rendering.
+       ========================================================================= -->
+  <script src="js/prng.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

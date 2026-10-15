@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Road Fighter · Prueba de rondas</title>
+  <style>
+    body { margin: 0; padding: 16px; background: #070a18; color: #eef1ff; font: 15px/1.5 'Segoe UI', system-ui, sans-serif; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p { color: #98a2c8; margin: 0 0 12px; }
+    #log { white-space: pre-wrap; font-family: Consolas, monospace; font-size: 13px; }
+    .ok { color: #7dffb0; } .fail { color: #ff4a5f; } .info { color: #98a2c8; }
+    #summary { font-weight: 700; font-size: 17px; margin: 12px 0; }
+    iframe { width: 560px; height: 380px; max-width: 100%; border: 1px solid #333; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Prueba de rondas del juego</h1>
+  <p>Carga el juego real en un marco y simula varias rondas con cada generador (paso fijo de 1/60 s).
+     Abrir con <code>npx serve .</code> en <code>/tests/rondas.html</code>.</p>
+  <div id="summary">Ejecutando…</div>
+  <div id="log"></div>
+  <iframe id="game" src="../index.html"></iframe>
+
+<script>
+'use strict';
+const logEl = document.getElementById('log');
+let passed = 0, failed = 0;
+const line = (cls, txt) => { const s = document.createElement('div'); s.className = cls; s.textContent = txt; logEl.appendChild(s); };
+function check(name, cond, detail) {
+  if (cond) { passed++; line('ok', '✔ ' + name); }
+  else { failed++; line('fail', '✘ ' + name + (detail ? '  → ' + detail : '')); }
+}
+const pause = () => new Promise((r) => setTimeout(r, 0));
+
+document.getElementById('game').addEventListener('load', async () => {
+  const win = document.getElementById('game').contentWindow;
+  const doc = win.document;
+  const errors = [];
+  // Las pruebas escriben récord, tabla, dificultad y nombre: se guardan los reales para restaurarlos al final
+  const STORED = ['roadfighter.hi', 'roadfighter.scores', 'roadfighter.diff', 'roadfighter.name', 'roadfighter.wallet'];
+  const saved = Object.fromEntries(STORED.map((k) => [k, win.localStorage.getItem(k)]));
+  win.addEventListener('error', (e) => errors.push(e.message));
+  const rf = win.__RF;
+  const { G, input, LANES, PLAYER_W } = rf;
+  /** Objetos que cierran un carril y cuestan una vida: vehículos y barreras de obra */
+  const blocks = (e) => e.mov || e.type === 'barrier';
+  /** ¿Se superponen las cajas de dos objetos (con un margen de tolerancia en px)? */
+  const overlap = (a, b, m) => Math.abs(a.lat - b.lat) < (a.hw + b.hw) / 2 - m && Math.abs(a.w - b.w) < (a.hh + b.hh) / 2 - m;
+  const DT = 1 / 60;
+  const METHODS = { 'middle-square': 'Cuadrado medio', 'lcg': 'Congruencial lineal', 'middle-product': 'Productos medios' };
+
+  /** Empieza una partida igual que el jugador: rellena el menú y llama a startGame. */
+  function start(method, seed, diff = 'normal') {
+    doc.getElementById('rngMethod').value = method;
+    doc.getElementById('rngSeed').value = seed;
+    doc.querySelector(`input[name="diff"][value="${diff}"]`).checked = true;
+    rf.wallet.credits = rf.CREDITS_MAX; // las pruebas no deben quedarse sin créditos
+    G.t = 0; // reloj de animación a 0 para que dos ejecuciones sean idénticas
+    rf.startGame();
+    G.cd = 0;
+  }
+
+  /**
+   * ¿Hay un "muro"? Es decir, una franja de la carretera del largo del coche del
+   * jugador (74 px + 7 px de margen por lado) en la que los 4 carriles están
+   * ocupados por vehículos o barreras, de modo que no cabe por ningún hueco.
+   * @param {number} [nearW] - Si se indica, solo mira franjas cerca de esa distancia.
+   */
+  function wall(nearW, exclude) {
+    const BAND = 88;
+    const movs = G.entities.filter((e) => blocks(e) && !e.crashed && e.w > G.dist && e !== exclude);
+    for (const e of movs) {
+      for (const b of [e.w - e.hh / 2, e.w + e.hh / 2 - BAND]) { // franjas pegadas a cada extremo del coche
+        if (nearW !== undefined && Math.abs(b - nearW) > 300) continue;
+        const occ = new Set();
+        for (const f of movs) {
+          if (f.w + f.hh / 2 > b && f.w - f.hh / 2 < b + BAND) {
+            for (let i = 0; i < LANES.length; i++) if (Math.abs(f.lat - LANES[i]) < (f.hw + PLAYER_W) / 2) occ.add(i);
+          }
+        }
+        if (occ.size >= 4) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Simula una etapa. Si 'safe' es true mantiene combustible e invulnerabilidad
+   * y no deja que la curva saque al coche del asfalto (así recorre las 5 etapas);
+   * acelera siempre, sin girar.
+   * - spawnWalls: muros CREADOS por un vehículo recién aparecido (si se quita ese vehículo,
+   *   el muro desaparece). Es lo que controla el generador junto con laneFree.
+   * - convoyFrames: fotogramas con un muro formado después, al alcanzarse coches de distinta velocidad.
+   * - trafficThrough: fotogramas en que un coche del tráfico atraviesa una barrera o un peatón.
+   * - types: tipos de objeto que aparecieron.
+   */
+  function runStage(safe, maxSeconds = 150) {
+    const st = { frames: 0, spawnWalls: 0, convoyFrames: 0, badLat: 0, trafficThrough: 0, types: new Set(), startScore: G.score, exception: null };
+    input.up = true; input.turbo = false; input.left = input.right = false;
+    try {
+      while (st.frames < maxSeconds / DT) {
+        if (safe) { G.invuln = 999; G.fuel = 100; G.lat = Math.max(-120, Math.min(120, G.lat)); }
+        const prev = new Set(G.entities);
+        rf.update(DT);
+        st.frames++;
+        for (const n of G.entities) {
+          st.types.add(n.type);
+          if (!prev.has(n) && blocks(n) && wall(n.w) && !wall(n.w, n)) st.spawnWalls++;
+        }
+        if (wall()) st.convoyFrames++;
+        // Peatones, pasos de cebra y señales de curva están en la acera / atraviesan la calzada: no cuentan
+        for (const e of G.entities) if (!['ped', 'zebra', 'sign'].includes(e.type) && Math.abs(e.lat) > 146) st.badLat++;
+        const obst = G.entities.filter((o) => o.type === 'barrier' || (o.type === 'ped' && !o.crashed));
+        for (const v of G.entities) {
+          if (!v.mov || v.crashed) continue;
+          if (obst.some((o) => overlap(v, o, 4))) { st.trafficThrough++; break; }
+        }
+        if (!safe && (G.crash || G.state !== 'play')) break;
+        if (['stageclear', 'victory', 'gameover'].includes(G.state)) break;
+      }
+    } catch (e) { st.exception = e; }
+    input.up = false;
+    return st;
+  }
+
+  // 1. Campaña completa (5 etapas) con cada generador
+  for (const [m, label] of Object.entries(METHODS)) {
+    line('info', `\n— ${label}: 5 etapas, semilla 12345 —`);
+    start(m, '12345');
+    check(`${label}: el juego usa el generador elegido`, rf.getRng().name === label, rf.getRng().name);
+    let stages = 0, spawnWalls = 0, convoy = 0, frames = 0, badLat = 0, through = 0, exc = null, scoreUp = true;
+    const types = new Set();
+    for (let s = 0; s < 5; s++) {
+      if (s > 0) { rf.startStage(s); G.cd = 0; }
+      const st = runStage(true);
+      stages += (G.state === 'stageclear' || G.state === 'victory') ? 1 : 0;
+      spawnWalls += st.spawnWalls; convoy += st.convoyFrames; frames += st.frames;
+      badLat += st.badLat; through += st.trafficThrough; exc = exc || st.exception;
+      st.types.forEach((t) => types.add(t));
+      scoreUp = scoreUp && G.score > st.startScore;
+      await pause();
+    }
+    const log = G.spawnLog;
+    check(`${label}: sin excepciones`, !exc && errors.length === 0, exc ? exc.message : errors.join('; '));
+    check(`${label}: 5 etapas completadas`, stages === 5 && G.state === 'victory', `etapas=${stages}, estado=${G.state}`);
+    check(`${label}: la puntuación crece en cada etapa`, scoreUp, 'puntuación=' + Math.floor(G.score));
+    check(`${label}: todos los carriles generados ∈ {0,1,2,3}`, log.length > 0 && log.every((x) => x.lane >= 0 && x.lane <= 3), `${log.length} apariciones`);
+    const counts = [0, 0, 0, 0]; log.forEach((x) => counts[x.lane]++);
+    line('info', `   apariciones registradas (últimas ${log.length}) por carril: [${counts.join(', ')}]`);
+    check(`${label}: posiciones laterales dentro de la calzada`, badLat === 0, `${badLat} fuera`);
+    check(`${label}: ninguna aparición cierra los 4 carriles (sin muros al aparecer)`, spawnWalls === 0, `${spawnWalls} apariciones forman muro`);
+    line('info', `   convoyes formados después por diferencia de velocidad (lógica original del tráfico): ` +
+      `${(100 * convoy / frames).toFixed(1)} % de los fotogramas (no los crea la aparición; el convoy sigue avanzando)`);
+    const needed = ['hole', 'barrier', 'ped', 'zebra'];
+    check(`${label}: aparecen los obstáculos nuevos (bache, obras, peatón, cebra)`, needed.every((t) => types.has(t)),
+      'tipos vistos: ' + [...types].join(', '));
+    check(`${label}: el tráfico no atraviesa barreras ni peatones`, through === 0, `${through} fotogramas con superposición`);
+  }
+
+  // 1b. Colisiones precisas y efecto de cada obstáculo (escenarios controlados)
+  line('info', '\n— Colisiones y obstáculos —');
+  /** Carretera vacía con el jugador en el carril 40, a 150 km/h, sin invulnerabilidad. */
+  function freshRoad() {
+    start('lcg', '1');
+    rf.update(DT); // pasa de 'countdown' a 'play'
+    G.entities = []; G.nextSpawn = G.nextFuel = G.nextPed = 1e9;
+    G.invuln = 0; G.lat = 40; G.speed = 150; G.dist = 1000; G.fuel = 100;
+  }
+  /** Avanza la simulación 'sec' segundos o hasta que 'stop()' sea verdadero. */
+  function sim(sec, stop, each) {
+    for (let i = 0; i < sec / DT; i++) { if (each) each(); rf.update(DT); if (stop && stop()) return true; }
+    return false;
+  }
+
+  // Precisión lateral: coche parado delante a distintas separaciones (carrocerías: 44 px de ancho)
+  const hits = {};
+  for (const dx of [0, 20, 30, 38, 44, 50, 60]) {
+    freshRoad();
+    const car = rf.addEntity('sedan', 1400, 40 + dx);
+    input.up = true;
+    hits[dx] = sim(3, () => !!G.crash, () => { car.speed = 0; });
+    input.up = false;
+  }
+  check('Coche que se superpone visualmente (separación < 40 px) → choque', [0, 20, 30, 38].every((d) => hits[d]),
+    JSON.stringify(hits));
+  check('Coche que no se toca (separación ≥ 44 px) → sin choque', [44, 50, 60].every((d) => !hits[d]), JSON.stringify(hits));
+
+  // Barrera de obras en el carril → choque
+  freshRoad();
+  rf.addEntity('barrier', 1500, 40);
+  input.up = true;
+  check('Barrera de obras en el carril → choque', sim(3, () => !!G.crash));
+  input.up = false;
+
+  // Bache → frena y sacude, sin choque ni pérdida de vida
+  freshRoad();
+  rf.addEntity('hole', 1400, 40);
+  const lives0 = G.lives;
+  let minSpeed = 999, bumped = false;
+  input.up = true;
+  sim(1.5, null, () => { if (G.bump > 0) { bumped = true; minSpeed = Math.min(minSpeed, G.speed); } });
+  input.up = false;
+  check('Bache → el coche frena y bota, sin choque', bumped && minSpeed < 100 && !G.crash && G.lives === lives0,
+    `bump=${bumped}, velocidad mínima=${minSpeed.toFixed(0)}, choque=${!!G.crash}`);
+
+  // Peatón cruzando delante → choque (pierde una vida); el peatón vuelve a la acera
+  freshRoad();
+  rf.spawnCrossing(1500);
+  const ped = G.entities.find((e) => e.type === 'ped');
+  ped.pstate = 'walk'; ped.lat = 40; ped.walk = 0; // detenido en mitad del carril del jugador
+  input.up = true;
+  check('Peatón en el carril → choque', sim(3, () => !!G.crash));
+  input.up = false;
+  sim(1);
+  check('El peatón atropellado no queda en la calzada (vuelve a la acera)', Math.abs(ped.lat) >= 176, 'lat=' + ped.lat.toFixed(0));
+
+  // Peatón cruza la calzada completa si el jugador está detenido
+  freshRoad();
+  G.speed = 0; G.lat = 120;
+  rf.spawnCrossing(1500);
+  const ped2 = G.entities.find((e) => e.type === 'ped');
+  ped2.pstate = 'walk';
+  check('Con el jugador detenido, el peatón termina de cruzar', sim(10, () => ped2.pstate === 'done') && !G.crash,
+    `estado=${ped2.pstate}, lat=${ped2.lat.toFixed(0)}`);
+
+  // El tráfico cambia de carril ante una barrera
+  freshRoad();
+  G.speed = 0; G.lat = -120; G.invuln = 999;
+  const bar = rf.addEntity('barrier', 1700, 40);
+  const car2 = rf.addEntity('sedan', 1250, 40); car2.lane = 40; car2.speed = 90;
+  let carThrough = false;
+  sim(8, () => car2.w > bar.w + 200, () => { if (overlap(car2, bar, 4)) carThrough = true; });
+  check('Un coche del tráfico esquiva la barrera cambiando de carril', !carThrough && car2.w > bar.w && Math.abs(car2.lat - 40) > 40,
+    `atravesó=${carThrough}, carril final=${car2.lat.toFixed(0)}`);
+
+  // El tráfico cede el paso al peatón
+  freshRoad();
+  G.speed = 0; G.lat = 120; G.invuln = 999;
+  rf.spawnCrossing(1700);
+  const ped3 = G.entities.find((e) => e.type === 'ped');
+  ped3.pstate = 'walk'; ped3.side = -1; ped3.lat = -150; ped3.target = 192; ped3.walk = 45;
+  const car3 = rf.addEntity('sedan', 1350, -40); car3.lane = -40; car3.speed = 90;
+  let pedThrough = false, waited = false;
+  sim(12, () => ped3.pstate === 'done' && car3.w > ped3.w + 100, () => {
+    if (overlap(car3, ped3, 2)) pedThrough = true;
+    if (car3.w < ped3.w && ped3.pstate === 'walk' && Math.abs(ped3.lat - car3.lat) < 50) waited = true;
+  });
+  check('Un coche del tráfico cede el paso al peatón (no lo atraviesa)', !pedThrough && waited && ped3.pstate === 'done',
+    `atravesó=${pedThrough}, esperó=${waited}, peatón=${ped3.pstate}`);
+  await pause();
+
+  // 2. Detección de colisiones: sin invulnerabilidad, seguir siempre por el mismo carril
+  //    sin esquivar nada debe acabar en choque (con coche, barrera o peatón)
+  for (const [m, label] of Object.entries(METHODS)) {
+    start(m, '777');
+    runStage(true, 3.5); // pasa la cuenta atrás
+    G.invuln = 0;
+    const lives = G.lives;
+    let crashed = false;
+    for (let i = 0; i < 120 / DT && !crashed; i++) {
+      G.fuel = 100;
+      G.lat = 40; // el conductor de prueba compensa la curva y no se sale del carril
+      input.up = true;
+      rf.update(DT);
+      if (G.crash || G.lives < lives) crashed = true;
+    }
+    input.up = false;
+    check(`${label}: se detecta una colisión al ir recto sin esquivar`, crashed);
+    await pause();
+  }
+
+  // 3. Reproducibilidad y cambio efectivo del generador (etapa 1, misma entrada)
+  line('info', '\n— Reproducibilidad —');
+  const firstStage = (m, seed) => { start(m, seed); runStage(true); return JSON.stringify(G.spawnLog); };
+  const logs = {};
+  for (const m of Object.keys(METHODS)) {
+    logs[m] = firstStage(m, '12345');
+    check(`${METHODS[m]}: misma semilla y misma entrada → mismas apariciones`, firstStage(m, '12345') === logs[m]);
+    check(`${METHODS[m]}: otra semilla → apariciones distintas`, firstStage(m, '54321') !== logs[m]);
+    await pause();
+  }
+  check('Mismo número de semilla, distinto método → apariciones distintas',
+    logs['middle-square'] !== logs['lcg'] && logs['lcg'] !== logs['middle-product'] && logs['middle-square'] !== logs['middle-product']);
+  line('info', '   Primeras 8 apariciones (tipo/carril) con semilla 12345:');
+  for (const m of Object.keys(METHODS)) {
+    line('info', `   ${METHODS[m].padEnd(20)} ` + JSON.parse(logs[m]).slice(0, 8).map((x) => `${x.type}/${x.lane}`).join('  '));
+  }
+
+  // 4. Semilla inválida: no debe empezar la partida
+  doc.getElementById('rngSeed').value = 'abc';
+  G.state = 'menu';
+  rf.startGame();
+  check('Semilla inválida ("abc") → no empieza y muestra error', G.state === 'menu' && doc.getElementById('rngInfo').classList.contains('error'),
+    doc.getElementById('rngInfo').textContent);
+
+  // 5. Dificultad
+  line('info', '\n— Dificultad —');
+  const livesBy = {};
+  for (const d of ['easy', 'normal', 'hard']) { start('lcg', '12345', d); livesBy[d] = G.lives; }
+  check('Vidas iniciales: Fácil 5, Normal 3, Difícil 2', livesBy.easy === 5 && livesBy.normal === 3 && livesBy.hard === 2, JSON.stringify(livesBy));
+
+  /** Juega 40 s de la etapa 1 con la dificultad dada y mide apariciones, combustible y velocidad del primer coche. */
+  function measure(d) {
+    start('lcg', '12345', d);
+    let firstCarSpeed = null;
+    input.up = true;
+    sim(40, null, () => {
+      G.invuln = 999; G.lat = Math.max(-120, Math.min(120, G.lat));
+      if (firstCarSpeed === null) {
+        const c = G.entities.find((e) => e.mov);
+        if (c) firstCarSpeed = c.speed;
+      }
+    });
+    input.up = false;
+    return { spawns: G.spawnTotal, fuel: G.fuel, firstCarSpeed };
+  }
+  const easy = measure('easy'), hard = measure('hard');
+  line('info', `   40 s de etapa 1 · Fácil: ${easy.spawns} apariciones, combustible ${easy.fuel.toFixed(1)} % · ` +
+    `Difícil: ${hard.spawns} apariciones, combustible ${hard.fuel.toFixed(1)} %`);
+  check('Difícil genera más tráfico y obstáculos que Fácil', hard.spawns > easy.spawns, `${hard.spawns} vs ${easy.spawns}`);
+  check('Difícil gasta más combustible que Fácil', hard.fuel < easy.fuel, `${hard.fuel.toFixed(1)} vs ${easy.fuel.toFixed(1)}`);
+  // Misma semilla: el primer coche sale con el mismo u, así que la razón de velocidades es 1.12 / 0.9
+  const ratio = hard.firstCarSpeed / easy.firstCarSpeed;
+  check('Difícil hace el tráfico más rápido (razón 1.12/0.9 ≈ 1.244 para el mismo coche)', Math.abs(ratio - 1.12 / 0.9) < 0.001, 'razón=' + ratio.toFixed(4));
+  await pause();
+
+  // 6. Tabla de puntajes
+  line('info', '\n— Tabla de puntajes —');
+  win.localStorage.removeItem(rf.SCORES_KEY);
+  const pts = [500, 1200, 300, 4100, 800, 2500, 2500, 50, 3300, 900, 1500, 700];
+  pts.forEach((p, i) => rf.addHighScore({ name: 'J' + i, score: p, stage: 1, diff: 'normal', method: 'lcg', seed: 1 }));
+  const list = rf.loadScores();
+  check('La tabla guarda como máximo 10 puntajes', list.length === 10, 'longitud=' + list.length);
+  check('La tabla está ordenada de mayor a menor', list.every((s, i) => i === 0 || list[i - 1].score >= s.score), list.map((s) => s.score).join(','));
+  check('Con empate, el más antiguo queda primero', list.findIndex((s) => s.name === 'J5') < list.findIndex((s) => s.name === 'J6'));
+  check('Puntajes por debajo del 10.º no entran; por encima sí', !rf.qualifies(list[9].score) && rf.qualifies(list[9].score + 1),
+    'mínimo=' + list[9].score);
+  rf.addHighScore({ name: '<b>Ana</b> con un nombre muy largo', score: 9999, stage: 3, diff: 'hard', method: 'middle-square', seed: 42 });
+  rf.renderScores(1);
+  const firstRow = doc.querySelector('#scoresBody tr');
+  check('El nombre se recorta a 12 caracteres y se muestra como texto (sin interpretar HTML)',
+    firstRow.children[1].textContent === '<b>Ana</b> c' && !firstRow.querySelector('b'), firstRow.children[1].innerHTML);
+  check('La fila guarda dificultad, generador y semilla', /Difícil/.test(firstRow.textContent) && /Cuad\. medio\s*semilla 42/.test(firstRow.textContent),
+    firstRow.textContent);
+  rf.addHighScore({ name: '   ', score: 10000, stage: 1, diff: 'easy', method: 'lcg', seed: 7 });
+  check('Nombre vacío → "Jugador"', rf.loadScores()[0].name === 'Jugador', rf.loadScores()[0].name);
+
+  // Flujo real: Game Over con puntuación alta → formulario → guardar
+  win.localStorage.removeItem(rf.SCORES_KEY);
+  start('middle-product', '2024', 'hard');
+  rf.update(DT);
+  G.score = 5000;
+  rf.gameOver('Prueba');
+  const form = doc.querySelector('#gameover [data-entry]');
+  check('Game Over con puntuación que entra en la tabla → aparece el formulario de nombre', !form.classList.contains('hidden'));
+  form.querySelector('input').value = 'Tester';
+  form.requestSubmit();
+  const top = rf.loadScores()[0] || {};
+  check('Al guardar, la tabla registra nombre, puntos, dificultad, generador y semilla',
+    top.name === 'Tester' && top.score === 5000 && top.diff === 'hard' && top.method === 'middle-product' && top.seed === 2024,
+    JSON.stringify(top));
+  check('El formulario se oculta y no permite guardar dos veces', form.classList.contains('hidden') && G.scoreSaved);
+
+  // 7. Generador de tableros: trazado de cada etapa
+  line('info', '\n— Generador de tableros (trazado) —');
+  const savedTrack = G.track;
+  /** Muestrea un trazado cada 10 px: pendiente máxima, desplazamiento máximo y tramos rectos de salida y llegada */
+  function inspect(t) {
+    G.track = t;
+    let maxSlope = 0, maxOff = 0, startOk = true, endOk = true, travel = 0, prev = 0;
+    const xEnd = rf.roadCenter(t.len);
+    for (let w = 0; w <= t.len; w += 10) {
+      const x = rf.roadCenter(w), s = Math.abs(rf.roadCenter(w + 1) - x);
+      maxSlope = Math.max(maxSlope, s); maxOff = Math.max(maxOff, Math.abs(x));
+      travel += Math.abs(x - prev); prev = x;
+      if (w <= 3200 && Math.abs(x) > 1e-9) startOk = false;
+      if (w >= t.len - 2600 && Math.abs(x - xEnd) > 1e-9) endOk = false;
+    }
+    // avgSlope: desplazamiento lateral total por cada px recorrido (cuánto "gira" la pista en promedio)
+    return { maxSlope, maxOff, startOk, endOk, avgSlope: travel / t.len, curves: t.curves.length, sharp: t.curves.filter((c) => c.sharp).length };
+  }
+  const build = (i, m, s, d) => rf.buildTrack(i, m, s, d, rf.STAGES[i].len);
+  check('Misma semilla, método, etapa y dificultad → mismo trazado',
+    Object.keys(METHODS).every((m) => JSON.stringify(build(2, m, 12345, 'normal').pts) === JSON.stringify(build(2, m, 12345, 'normal').pts)));
+  check('Otra semilla → otro trazado', JSON.stringify(build(2, 'lcg', 12345, 'normal').pts) !== JSON.stringify(build(2, 'lcg', 54321, 'normal').pts));
+  check('Otro método con la misma semilla → otro trazado',
+    JSON.stringify(build(2, 'lcg', 12345, 'normal').pts) !== JSON.stringify(build(2, 'middle-square', 12345, 'normal').pts));
+  check('Cada etapa tiene su propio trazado', JSON.stringify(build(0, 'lcg', 12345, 'normal').pts) !== JSON.stringify(build(1, 'lcg', 12345, 'normal').pts));
+
+  let worstSlope = 0, worstOff = 0, straightOk = true, n = 0, slopeOverDiff = 0;
+  const slopeBy = { easy: 0, normal: 0, hard: 0 };
+  const sharpBy = { 0: 0, 4: 0 }, offBy = { easy: 0, hard: 0 };
+  for (const m of Object.keys(METHODS)) {
+    for (const s of [1, 777, 2024, 12345, 99999]) {
+      for (let i = 0; i < 5; i++) {
+        for (const d of ['easy', 'normal', 'hard']) {
+          const t = build(i, m, s, d), r = inspect(t);
+          worstSlope = Math.max(worstSlope, r.maxSlope); worstOff = Math.max(worstOff, r.maxOff);
+          if (r.maxSlope > rf.DIFFS[d].slope + 0.002) slopeOverDiff++;
+          slopeBy[d] = Math.max(slopeBy[d], r.maxSlope);
+          straightOk = straightOk && r.startOk && r.endOk; n++;
+          if (d === 'normal' && (i === 0 || i === 4)) sharpBy[i] += r.sharp;
+          if (i === 4 && d !== 'normal') offBy[d] += r.avgSlope;
+        }
+      }
+    }
+    await pause();
+  }
+  line('info', `   ${n} trazados revisados · pendiente máxima Fácil ${slopeBy.easy.toFixed(3)}, Normal ${slopeBy.normal.toFixed(3)}, ` +
+    `Difícil ${slopeBy.hard.toFixed(3)} (antes, con senos fijos: ~0.088) · desplazamiento máximo ${worstOff.toFixed(0)} px`);
+  check('Pendiente nunca mayor que el límite de su dificultad (0.12 / 0.16 / 0.19)', slopeOverDiff === 0, `${slopeOverDiff} trazados lo superan`);
+  line('info', `   Curvas cerradas (15 trazados por etapa, Normal) · etapa 1: ${sharpBy[0]} · etapa 5: ${sharpBy[4]}`);
+  check(`Pendiente nunca mayor que el límite (${rf.MAX_SLOPE})`, worstSlope <= rf.MAX_SLOPE + 0.002, worstSlope.toFixed(4));
+  check(`Desplazamiento lateral nunca mayor que ${rf.MAX_OFFSET} px`, worstOff <= rf.MAX_OFFSET + 1e-9, worstOff.toFixed(1));
+  check('Salida (primeros 3200 px) y llegada (últimos 2600 px) rectas', straightOk);
+  check('Las etapas avanzadas tienen más curvas cerradas que la primera', sharpBy[4] > sharpBy[0], `${sharpBy[4]} vs ${sharpBy[0]}`);
+  check('Difícil tiene más curva que Fácil (desplazamiento lateral por px, etapa 5)', offBy.hard > offBy.easy,
+    `difícil ${(offBy.hard / 15).toFixed(4)} vs fácil ${(offBy.easy / 15).toFixed(4)}`);
+  G.track = savedTrack;
+
+  // Las señales de curva aparecen antes de cada curva cerrada
+  start('lcg', '12345');
+  const signs = G.entities.filter((e) => e.type === 'sign');
+  const sharpCurves = G.track.curves.filter((c) => c.sharp);
+  check('Hay una señal de curva peligrosa antes de cada curva cerrada', signs.length === sharpCurves.length &&
+    sharpCurves.every((c) => signs.some((s) => s.w < c.w0 && c.w0 - s.w <= 300 && s.dir === c.dir)),
+    `${signs.length} señales, ${sharpCurves.length} curvas cerradas`);
+
+  // 8. Créditos de juego y premios
+  line('info', '\n— Créditos de juego y premios —');
+  rf.wallet.credits = 1;
+  doc.querySelector('input[name="diff"][value="normal"]').checked = true;
+  doc.getElementById('rngSeed').value = '12345';
+  G.state = 'menu';
+  const played0 = rf.wallet.played;
+  rf.startGame();
+  check('Empezar una partida cuesta 1 crédito', rf.wallet.credits === 0 && rf.wallet.played === played0 + 1 && G.state === 'countdown',
+    `créditos=${rf.wallet.credits}, estado=${G.state}`);
+  G.state = 'gameover';
+  rf.startGame();
+  check('Sin créditos no se puede jugar: vuelve al menú con aviso', G.state === 'menu' &&
+    /Sin créditos/.test(doc.getElementById('rngInfo').textContent), doc.getElementById('rngInfo').textContent);
+  const ins0 = rf.wallet.inserted;
+  rf.insertCoin();
+  check('Insertar ficha suma 1 crédito', rf.wallet.credits === 1 && rf.wallet.inserted === ins0 + 1);
+  rf.wallet.credits = rf.CREDITS_MAX;
+  rf.insertCoin();
+  check(`Los créditos no pasan de ${rf.CREDITS_MAX}`, rf.wallet.credits === rf.CREDITS_MAX);
+  check('Cada movimiento queda en el historial', rf.wallet.history.length > 0 && /Ficha insertada/.test(rf.wallet.history[0].text),
+    rf.wallet.history[0] && rf.wallet.history[0].text);
+
+  // Vida extra cada 10 000 puntos
+  start('lcg', '12345');
+  rf.update(DT);
+  const L0 = G.lives;
+  G.score = rf.EXTRA_LIFE_EVERY; rf.update(DT);
+  const L1 = G.lives;
+  G.score = 3.05 * rf.EXTRA_LIFE_EVERY; rf.update(DT);
+  check('Premio: +1 vida al llegar a 10 000 puntos y otra por cada 10 000 más', L1 === L0 + 1 && G.lives === L0 + 3 &&
+    G.prizes.length === 3, `vidas ${L0} → ${L1} → ${G.lives}, premios=${G.prizes.length}`);
+
+  // +1 crédito al completar el campeonato
+  start('lcg', '12345');
+  rf.wallet.credits = 5;
+  rf.startStage(4); G.cd = 0; rf.update(DT);
+  rf.finishStage();
+  sim(4, () => G.state === 'victory');
+  check('Premio: +1 crédito al completar las 5 etapas', G.state === 'victory' && rf.wallet.credits === 6 &&
+    G.prizes.some((p) => /campeonato/.test(p)) && !doc.querySelector('#victory [data-prizes]').classList.contains('hidden'),
+    `estado=${G.state}, créditos=${rf.wallet.credits}, premios=${G.prizes.join(' | ')}`);
+
+  // +1 crédito al quedar en el top 3
+  win.localStorage.removeItem(rf.SCORES_KEY);
+  start('lcg', '12345');
+  rf.update(DT);
+  rf.wallet.credits = 2;
+  G.score = 7777;
+  rf.gameOver('Prueba');
+  const f2 = doc.querySelector('#gameover [data-entry]');
+  f2.querySelector('input').value = 'Podio';
+  f2.requestSubmit();
+  check('Premio: +1 crédito al quedar en el top 3 del ranking', rf.wallet.credits === 3 &&
+    /Premio/.test(doc.querySelector('#gameover [data-saved]').textContent), doc.querySelector('#gameover [data-saved]').textContent);
+
+  for (const k of STORED) {
+    if (saved[k] === null) win.localStorage.removeItem(k);
+    else win.localStorage.setItem(k, saved[k]);
+  }
+
+  const sum = document.getElementById('summary');
+  sum.textContent = `${passed} comprobaciones superadas, ${failed} fallidas`;
+  sum.className = failed ? 'fail' : 'ok';
+  window.__RESULT = { passed, failed };
+});
+</script>
+</body>
+</html>
