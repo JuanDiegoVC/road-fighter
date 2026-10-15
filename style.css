@@ -1,0 +1,706 @@
+/* ==========================================================================
+   ROAD FIGHTER · Hoja de estilos (CSS3)
+   Estética retro-arcade futurista con Glassmorphism, efectos de iluminación
+   de neón, tipografías dinámicas y adaptación responsive completa.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. VARIABLES DE DISEÑO (DESIGN TOKENS)
+   Paleta de colores, tipografías y valores globales reutilizables.
+   -------------------------------------------------------------------------- */
+:root {
+  --bg: #070a18;                        /* Fondo oscuro espacial */
+  --ink: #eef1ff;                       /* Color de texto principal */
+  --muted: #98a2c8;                     /* Color secundario / atenuado */
+  --accent: #ff3d54;                    /* Rojo neón principal (Road Fighter) */
+  --accent-2: #ffb02e;                  /* Ámbar / dorado para récords y avisos */
+  --cyan: #2ee6d6;                      /* Cian eléctrico para velocidad y destaques */
+  --glass: rgba(16, 20, 44, 0.62);      /* Fondo translúcido con desenfoque */
+  --glass-brd: rgba(255, 255, 255, 0.12); /* Borde sutil reflectante */
+  --font-display: 'Orbitron', 'Segoe UI', system-ui, sans-serif; /* Títulos y números arcade */
+  --font-body: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;    /* Textos descriptivos */
+}
+
+/* --------------------------------------------------------------------------
+   2. RESETEO GLOBAL Y ESTILOS BASE
+   Garantiza que el layout ocupe el 100% de la ventana sin scrollbars molestos.
+   -------------------------------------------------------------------------- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 17px;
+  overflow: hidden;             /* Evita scroll indeseado durante el juego */
+  -webkit-user-select: none;    /* Impide selección accidental de texto al jugar */
+  user-select: none;
+  touch-action: none;           /* Desactiva zoom y gestos por defecto en móviles */
+}
+
+/* --------------------------------------------------------------------------
+   3. FONDO AMBIENTAL PROCEDURAL
+   Capa fija al fondo con resplandor difuminado (glow) y líneas diagonales retro.
+   -------------------------------------------------------------------------- */
+.bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: radial-gradient(1200px 700px at 50% -10%, #1b1f4d 0%, #0a0d22 55%, #05060f 100%);
+}
+
+/* Esferas de luz difuminadas que se mueven suavemente */
+.bg-glow {
+  position: absolute;
+  width: 60vmax;
+  height: 60vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: .35;
+  animation: drift 18s ease-in-out infinite alternate;
+}
+
+.bg-glow.g1 {
+  background: #ff3d54;
+  left: -20vmax;
+  bottom: -30vmax;
+}
+
+.bg-glow.g2 {
+  background: #2e6bff;
+  right: -22vmax;
+  top: -28vmax;
+  animation-delay: -7s;
+}
+
+/* Líneas diagonales animadas estilo scanline / velocidad */
+.bg-lines {
+  position: absolute;
+  inset: 0;
+  opacity: .5;
+  background-image: repeating-linear-gradient(115deg, transparent 0 46px, rgba(255, 255, 255, .035) 46px 48px);
+  animation: slide 6s linear infinite;
+}
+
+@keyframes drift {
+  to {
+    transform: translate(6vmax, -4vmax) scale(1.15);
+  }
+}
+
+@keyframes slide {
+  to {
+    background-position: 96px 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   4. ESTRUCTURA Y LAYOUT PRINCIPAL
+   Organiza los paneles laterales y el mueble central arcade en pantalla completa.
+   -------------------------------------------------------------------------- */
+.app {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 14px;
+}
+
+/* Marco contenedor del canvas de juego (simula un monitor de máquina arcade) */
+.game-wrap {
+  position: relative;
+  height: min(100%, 820px);
+  aspect-ratio: 560 / 760;      /* Mantiene la proporción vertical clásica arcade */
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000;
+  /* Múltiples capas de sombra con resplandor neón exterior */
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .1),
+              0 0 0 7px rgba(8, 10, 24, .9),
+              0 0 0 9px rgba(255, 61, 84, .55),
+              0 30px 90px rgba(0, 0, 0, .7),
+              0 0 120px rgba(255, 61, 84, .22);
+}
+
+#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   5. PANELES LATERALES (CONTROLES Y GUÍA)
+   Paneles translúcidos de vidrio esmerilado (Glassmorphism) con borde brillante.
+   -------------------------------------------------------------------------- */
+.panel {
+  width: 250px;
+  flex-shrink: 0;
+  padding: 22px 20px;
+  background: var(--glass);
+  border: 1px solid var(--glass-brd);
+  border-radius: 18px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.panel h2 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: .28em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 18px;
+}
+
+/* Lista de atajos de teclado */
+.keys {
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+
+.keys li {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  justify-content: start;
+  gap: 8px;
+}
+
+.keys li p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: .04em;
+}
+
+.kbd-group {
+  display: flex;
+  gap: 4px;
+}
+
+.or {
+  color: var(--muted);
+  font-size: 13px;
+  opacity: .7;
+}
+
+/* Teclas con relieve tridimensional físico tipo teclado mecánico */
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(#2c3270, #1a1e47);
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-bottom-width: 3px;     /* Simula la profundidad de la tecla */
+  border-radius: 8px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .4);
+}
+
+kbd.wide {
+  padding: 0 12px;
+}
+
+/* Lista de elementos de la guía derecha */
+.legend {
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.legend canvas {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, .05);
+  border-radius: 12px;
+  border: 1px solid var(--glass-brd);
+}
+
+.legend b {
+  display: block;
+  font-size: 16px;
+}
+
+.legend span {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.15;
+  display: block;
+}
+
+/* Caja de sugerencias / consejo pro */
+.tip {
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 176, 46, .09);
+  border: 1px solid rgba(255, 176, 46, .28);
+}
+
+.tip b {
+  color: var(--accent-2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.tip span {
+  color: #e5e0cf;
+  font-size: 14.5px;
+  line-height: 1.2;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   6. CAPAS SUPERPUESTAS (OVERLAYS Y DIÁLOGOS MODALES)
+   Menú principal, pausa, etapa superada, game over y victoria.
+   -------------------------------------------------------------------------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: radial-gradient(circle at 50% 40%, rgba(10, 13, 34, .55), rgba(4, 5, 14, .86));
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  transition: opacity .35s ease, visibility .35s;
+  z-index: 5;
+}
+
+.overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.overlay.hidden .card {
+  transform: translateY(18px) scale(.97);
+}
+
+/* Tarjeta contenedora de cada diálogo */
+.card {
+  width: min(100%, 400px);
+  text-align: center;
+  padding: 30px 26px 26px;
+  background: linear-gradient(160deg, rgba(34, 40, 84, .82), rgba(12, 15, 36, .9));
+  border: 1px solid var(--glass-brd);
+  border-radius: 22px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .12);
+  transition: transform .4s cubic-bezier(.2, .9, .3, 1.2);
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+/* Variantes temáticas para derrotas y victorias */
+.card-danger {
+  border-color: rgba(255, 61, 84, .45);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6), 0 0 60px rgba(255, 61, 84, .25);
+}
+
+.card-gold {
+  border-color: rgba(255, 200, 60, .5);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6), 0 0 60px rgba(255, 190, 40, .28);
+}
+
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: .32em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1.1;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff, #ffd9a0 60%, #ff7a4a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.card-danger .title {
+  background: linear-gradient(180deg, #fff, #ff9aa6 60%, #ff3d54);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* Logotipo retro icónico de ROAD FIGHTER */
+.logo {
+  display: grid;
+  line-height: .95;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  transform: skewX(-6deg);       /* Inclinación aerodinámica arcade */
+}
+
+.logo span {
+  display: block;
+  background: linear-gradient(180deg, #fff 8%, #ffd34d 45%, #ff3d54 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 4px 0 rgba(120, 10, 30, .65)) drop-shadow(0 0 22px rgba(255, 61, 84, .45));
+}
+
+.logo span:first-child {
+  font-size: 54px;
+  letter-spacing: .08em;
+}
+
+.logo span:last-child {
+  font-size: 62px;
+  letter-spacing: .02em;
+}
+
+.tagline {
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 600;
+  max-width: 28ch;
+}
+
+/* Estadísticas del menú */
+.menu-stats {
+  display: flex;
+  gap: 14px;
+}
+
+.menu-stats div {
+  min-width: 120px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--glass-brd);
+}
+
+.menu-stats small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+}
+
+.menu-stats strong {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--accent-2);
+}
+
+/* Lista de resultados y bonificaciones al completar una etapa */
+.results {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.results > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .05);
+}
+
+.results dt {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.results dd {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.results .total {
+  background: linear-gradient(90deg, rgba(255, 176, 46, .2), rgba(255, 61, 84, .2));
+  border: 1px solid rgba(255, 176, 46, .35);
+}
+
+.results .total dd {
+  color: var(--accent-2);
+  font-size: 22px;
+}
+
+.newrecord {
+  color: var(--accent-2);
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: .15em;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.newrecord.hidden {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   7. BOTONES E INTERACCIONES
+   Botones principales con pulsación luminosa, hover y active elásticos.
+   -------------------------------------------------------------------------- */
+.btn {
+  width: 100%;
+  cursor: pointer;
+  border: 0;
+  border-radius: 14px;
+  padding: 14px 20px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: #fff;
+  transition: transform .15s ease, box-shadow .2s ease, filter .2s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #ff4a5f, #ff8a2b);
+  box-shadow: 0 10px 28px rgba(255, 61, 84, .45), inset 0 1px 0 rgba(255, 255, 255, .35);
+  animation: glow 2.2s ease-in-out infinite;
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid var(--glass-brd);
+}
+
+.btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  filter: brightness(1.1);
+}
+
+.btn:active {
+  transform: translateY(1px) scale(.98);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.hint kbd {
+  min-width: 24px;
+  height: 24px;
+  font-size: 10px;
+  padding: 0 6px;
+}
+
+@keyframes glow {
+  50% {
+    box-shadow: 0 10px 40px rgba(255, 100, 60, .7), inset 0 1px 0 rgba(255, 255, 255, .35);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: .55;
+    transform: scale(1.05);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   8. BOTONES FLOTANTES SUPERIORES (SILENCIO Y CÁMARA DUAL)
+   -------------------------------------------------------------------------- */
+/* Botón de silenciar */
+.mute-btn {
+  position: absolute;
+  top: 76px;
+  left: 14px;
+  z-index: 4;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(10, 14, 30, .6);
+  border: 1px solid var(--glass-brd);
+  transition: background .2s, transform .15s;
+}
+
+.mute-btn:hover {
+  background: rgba(255, 61, 84, .5);
+  transform: scale(1.08);
+}
+
+.mute-btn.off {
+  color: #ff7a88;
+}
+
+/* Botón de alternancia de cámara (1ª Persona 3D / Cenital 2D) */
+.cam-btn {
+  position: absolute;
+  top: 76px;
+  right: 14px;
+  z-index: 4;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  background: rgba(10, 14, 30, .65);
+  border: 1px solid var(--glass-brd);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  transition: background .2s, transform .15s, border-color .2s;
+}
+
+.cam-btn:hover {
+  background: rgba(46, 230, 214, .35);
+  border-color: rgba(46, 230, 214, .6);
+  transform: scale(1.04);
+}
+
+.cam-btn.active {
+  color: var(--cyan);
+  border-color: rgba(46, 230, 214, .5);
+}
+
+/* --------------------------------------------------------------------------
+   9. CONTROLES TÁCTILES VIRTUALES (PARA MÓVILES Y PANTALLAS TÁCTILES)
+   -------------------------------------------------------------------------- */
+.touch {
+  display: none;                /* Oculto en ordenadores de sobremesa por defecto */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 12px;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.touch-side {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.touch button {
+  pointer-events: auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .35);
+  color: #fff;
+  font-size: 22px;
+  background: rgba(15, 20, 48, .55);
+  backdrop-filter: blur(6px);
+  touch-action: none;
+}
+
+.touch button.gas {
+  background: rgba(46, 230, 120, .45);
+  height: 84px;
+  width: 84px;
+}
+
+.touch button.brake {
+  background: rgba(255, 61, 84, .45);
+}
+
+.touch button.small {
+  width: 56px;
+  height: 56px;
+  font-size: 10px;
+  font-family: var(--font-display);
+}
+
+.touch button.active {
+  transform: scale(.92);
+  background: rgba(255, 255, 255, .4);
+}
+
+/* Detección de dispositivos táctiles reales */
+@media (pointer: coarse) {
+  .touch {
+    display: flex;
+  }
+
+  .mute-btn {
+    top: auto;
+    bottom: 120px;
+  }
+
+  .cam-btn {
+    top: auto;
+    bottom: 120px;
+    right: 14px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   10. ADAPTACIÓN RESPONSIVE Y ACCESIBILIDAD
+   -------------------------------------------------------------------------- */
+/* En pantallas pequeñas, ocultar los paneles laterales y centrar el juego */
+@media (max-width: 1000px) {
+  .panel {
+    display: none;
+  }
+}
+
+/* Respeto a las preferencias de usuarios con sensibilidad al movimiento */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
